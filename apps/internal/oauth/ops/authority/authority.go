@@ -24,6 +24,7 @@ import (
 const (
 	authorizationEndpoint             = "https://%v/%v/oauth2/v2.0/authorize"
 	aadInstanceDiscoveryEndpoint      = "https://%v/common/discovery/instance"
+	dstsInstanceDiscoveryEndpoint     = "https://%v/dstsv2/common/discovery/instance"
 	tenantDiscoveryEndpointWithRegion = "https://%s.%s/%s/v2.0/.well-known/openid-configuration"
 	regionName                        = "REGION_NAME"
 	defaultAPIVersion                 = "2021-10-01"
@@ -137,6 +138,7 @@ const (
 const (
 	AAD  = "MSSTS"
 	ADFS = "ADFS"
+	DSTS = "DSTS"
 )
 
 // AuthenticationScheme is an extensibility mechanism designed to be used only by Azure Arc for proof of possession access tokens.
@@ -252,6 +254,8 @@ func (p AuthParams) WithTenant(ID string) (AuthParams, error) {
 		authority = "https://" + path.Join(p.AuthorityInfo.Host, ID)
 	case ADFS:
 		return p, errors.New("ADFS authority doesn't support tenants")
+	case DSTS:
+		authority = "https://" + path.Join(p.AuthorityInfo.Host, "dstsv2", ID)
 	}
 
 	info, err := NewInfoFromAuthorityURI(authority, p.AuthorityInfo.ValidateAuthority, p.AuthorityInfo.InstanceDiscoveryDisabled)
@@ -351,35 +355,40 @@ type Info struct {
 	InstanceDiscoveryDisabled bool
 }
 
-func firstPathSegment(u *url.URL) (string, error) {
-	pathParts := strings.Split(u.EscapedPath(), "/")
-	if len(pathParts) >= 2 {
-		return pathParts[1], nil
-	}
-
-	return "", errors.New(`authority must be an https URL such as "https://login.microsoftonline.com/<your tenant>"`)
-}
-
 // NewInfoFromAuthorityURI creates an AuthorityInfo instance from the authority URL provided.
 func NewInfoFromAuthorityURI(authority string, validateAuthority bool, instanceDiscoveryDisabled bool) (Info, error) {
 	u, err := url.Parse(strings.ToLower(authority))
-	if err != nil || u.Scheme != "https" {
-		return Info{}, errors.New(`authority must be an https URL such as "https://login.microsoftonline.com/<your tenant>"`)
+	if err != nil {
+		return Info{}, fmt.Errorf("couldn't parse authority url: %w", err)
+	}
+	if u.Scheme != "https" {
+		return Info{}, errors.New("authority url scheme must be https")
 	}
 
-	tenant, err := firstPathSegment(u)
-	if err != nil {
-		return Info{}, err
+	pathParts := strings.Split(u.EscapedPath(), "/")
+	if len(pathParts) < 2 {
+		return Info{}, errors.New(`authority must be an URL such as "https://login.microsoftonline.com/<your tenant>"`)
 	}
-	authorityType := AAD
-	if tenant == "adfs" {
+
+	var authorityType, tenant string
+	switch pathParts[1] {
+	case "adfs":
 		authorityType = ADFS
+	case "dstsv2":
+		if len(pathParts) != 3 {
+			return Info{}, errors.New(`dSTS authority must be an https URL such as "https://<authority>/dstsv2/<your tenant>"`)
+		}
+		authorityType = DSTS
+		tenant = pathParts[2]
+	default:
+		authorityType = AAD
+		tenant = pathParts[1]
 	}
 
 	// u.Host includes the port, if any, which is required for private cloud deployments
 	return Info{
 		Host:                      u.Host,
-		CanonicalAuthorityURI:     fmt.Sprintf("https://%v/%v/", u.Host, tenant),
+		CanonicalAuthorityURI:     authority,
 		AuthorityType:             authorityType,
 		ValidateAuthority:         validateAuthority,
 		Tenant:                    tenant,
@@ -527,6 +536,18 @@ func (c Client) AADInstanceDiscovery(ctx context.Context, authorityInfo Info) (I
 		endpoint := fmt.Sprintf(aadInstanceDiscoveryEndpoint, discoveryHost)
 		err = c.Comm.JSONCall(ctx, endpoint, http.Header{}, qv, nil, &resp)
 	}
+	return resp, err
+}
+
+func (c Client) DSTSInstanceDiscovery(ctx context.Context, authorityInfo Info) (InstanceDiscoveryResponse, error) {
+	qv := url.Values{}
+	qv.Set("api-version", "1.1")
+	qv.Set("authorization_endpoint", fmt.Sprintf(authorizationEndpoint, authorityInfo.Host, authorityInfo.Tenant))
+
+	endpoint := fmt.Sprintf(dstsInstanceDiscoveryEndpoint, authorityInfo.Host)
+
+	resp := InstanceDiscoveryResponse{}
+	err := c.Comm.JSONCall(ctx, endpoint, http.Header{}, qv, nil, &resp)
 	return resp, err
 }
 

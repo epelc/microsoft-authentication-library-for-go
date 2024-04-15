@@ -21,6 +21,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/kylelemons/godebug/pretty"
+
 	"github.com/AzureAD/microsoft-authentication-library-for-go/apps/cache"
 	"github.com/AzureAD/microsoft-authentication-library-for-go/apps/internal/exported"
 	internalTime "github.com/AzureAD/microsoft-authentication-library-for-go/apps/internal/json/types/time"
@@ -28,8 +31,6 @@ import (
 	"github.com/AzureAD/microsoft-authentication-library-for-go/apps/internal/oauth/fake"
 	"github.com/AzureAD/microsoft-authentication-library-for-go/apps/internal/oauth/ops/accesstokens"
 	"github.com/AzureAD/microsoft-authentication-library-for-go/apps/internal/oauth/ops/authority"
-	"github.com/golang-jwt/jwt/v5"
-	"github.com/kylelemons/godebug/pretty"
 )
 
 // errorClient is an HTTP client for tests that should fail when confidential.Client sends a request
@@ -1331,4 +1332,73 @@ func TestWithAuthenticationScheme(t *testing.T) {
 	if result.AccessToken != fmt.Sprintf(mock.Authnschemeformat, token) {
 		t.Fatalf(`unexpected access token "%s"`, result.AccessToken)
 	}
+}
+
+func TestAcquireTokenByCredentialFromDSTS(t *testing.T) {
+	tests := map[string]struct {
+		cred string
+	}{
+		"secret":           {cred: "fake_secret"},
+		"signed assertion": {cred: "fake_assertion"},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			cred, err := NewCredFromSecret(test.cred)
+			if err != nil {
+				t.Fatal(err)
+			}
+			client, err := fakeClient(accesstokens.TokenResponse{
+				AccessToken:   token,
+				ExpiresOn:     internalTime.DurationTime{T: time.Now().Add(1 * time.Hour)},
+				ExtExpiresOn:  internalTime.DurationTime{T: time.Now().Add(1 * time.Hour)},
+				GrantedScopes: accesstokens.Scopes{Slice: tokenScope},
+				TokenType:     "Bearer",
+			}, cred, "https://fake_authority/dstsv2/fake_tenant")
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// expect first attempt to fail
+			_, err = client.AcquireTokenSilent(context.Background(), tokenScope)
+			if err == nil {
+				t.Errorf("unexpected nil error from AcquireTokenSilent: %s", err)
+			}
+
+			tk, err := client.AcquireTokenByCredential(context.Background(), tokenScope)
+			if err != nil {
+				t.Errorf("got err == %s, want err == nil", err)
+			}
+			if tk.AccessToken != token {
+				t.Errorf("unexpected access token %s", tk.AccessToken)
+			}
+
+			tk, err = client.AcquireTokenSilent(context.Background(), tokenScope)
+			if err != nil {
+				t.Errorf("got err == %s, want err == nil", err)
+			}
+			if tk.AccessToken != token {
+				t.Errorf("unexpected access token %s", tk.AccessToken)
+			}
+
+			// fail for another tenant
+			tk, err = client.AcquireTokenSilent(context.Background(), tokenScope, WithTenantID("other"))
+			if err == nil {
+				t.Errorf("unexpected nil error from AcquireTokenSilent: %s", err)
+			}
+		})
+	}
+
+	//// silent authentication should now succeed for the given tenant...
+	//if ar, err = client.AcquireTokenSilent(ctx, tokenScope, WithTenantID(tenant)); err != nil {
+	//	t.Fatal(err)
+	//}
+	//if ar.AccessToken != accessToken {
+	//	t.Fatal("cached access token should match the one returned by AcquireToken...")
+	//}
+	//// ...but fail for another tenant
+	//otherTenant := "not-" + tenant
+	//if _, err = client.AcquireTokenSilent(ctx, tokenScope, WithTenantID(otherTenant)); err == nil {
+	//	t.Fatal("expected an error")
+	//}
 }

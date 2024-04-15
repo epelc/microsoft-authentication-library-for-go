@@ -151,6 +151,13 @@ func (f Authority) AADInstanceDiscovery(ctx context.Context, info authority.Info
 	return f.InstanceResp, nil
 }
 
+func (f Authority) DSTSInstanceDiscovery(_ context.Context, _ authority.Info) (authority.InstanceDiscoveryResponse, error) {
+	if f.Err {
+		return authority.InstanceDiscoveryResponse{}, errors.New("error")
+	}
+	return f.InstanceResp, nil
+}
+
 // WSTrust is a fake implementation of the oauth.fetchWSTrust interface.
 type WSTrust struct {
 	// Set these to true to have their respective APIs return an error.

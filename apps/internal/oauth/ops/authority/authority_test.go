@@ -332,9 +332,10 @@ func TestAuthParamsWithTenant(t *testing.T) {
 		"do nothing if tenant override is empty":      {authority: host + uuid1, tenant: "", expectedAuthority: host + uuid1},
 		"do nothing if tenant override equals tenant": {authority: host + uuid1, tenant: uuid1, expectedAuthority: host + uuid1},
 
-		"override common to tenant":        {authority: host + "common", tenant: uuid1, expectedAuthority: host + uuid1},
-		"override organizations to tenant": {authority: host + "organizations", tenant: uuid1, expectedAuthority: host + uuid1},
-		"override tenant to tenant2":       {authority: host + uuid1, tenant: uuid2, expectedAuthority: host + uuid2},
+		"override common to tenant":           {authority: host + "common", tenant: uuid1, expectedAuthority: host + uuid1},
+		"override organizations to tenant":    {authority: host + "organizations", tenant: uuid1, expectedAuthority: host + uuid1},
+		"override tenant to tenant2":          {authority: host + uuid1, tenant: uuid2, expectedAuthority: host + uuid2},
+		"override tenant to tenant2 for dSTS": {authority: host + "dstsv2/" + uuid1, tenant: uuid2, expectedAuthority: host + "dstsv2/" + uuid2},
 
 		"tenant can't be common for AAD":        {authority: host + uuid1, tenant: "common", expectError: true},
 		"tenant can't be consumers for AAD":     {authority: host + uuid1, tenant: "consumers", expectError: true},
